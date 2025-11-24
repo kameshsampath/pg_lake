@@ -18,13 +18,65 @@ brew install go-task
 
 # Linux
 sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+
+# Windows (PowerShell - run as Administrator)
+# Using Chocolatey
+choco install go-task
+
+# Or using Scoop
+scoop install task
+
+# Or download binary from https://github.com/go-task/task/releases
+# Extract and add to PATH
 ```
 
 **Note**: Tasks run in silent mode by default for cleaner output. Use `task -v <task-name>` to see verbose output when debugging.
 
-### 2. Available Variables
+### 2. Set Environment Variables (Optional but Recommended)
 
-You can customize builds using these variables:
+Setting these environment variables simplifies your workflow:
+
+```bash
+# Set in your shell (add to ~/.bashrc, ~/.zshrc, or use direnv)
+export PG_MAJOR=18                          # Your preferred PostgreSQL version
+export COMPOSE_PROJECT_NAME=pg_lake         # Compose project name
+
+# Or use different project names to run multiple versions simultaneously
+export COMPOSE_PROJECT_NAME=pg_lake_pg17    # For PG 17 instance
+export COMPOSE_PROJECT_NAME=pg_lake_pg16    # For PG 16 instance
+```
+
+**Benefits:**
+
+- **No need to specify `PG_MAJOR` with every command** - `task compose:up` instead of `task compose:up PG_MAJOR=17`
+- **Run multiple versions simultaneously** - Use different `COMPOSE_PROJECT_NAME` for each version to avoid conflicts
+- **Consistent development environment** - All tools use the same PostgreSQL version
+
+**Using direnv (recommended):**
+
+```bash
+# Install direnv (if not already installed)
+brew install direnv  # macOS
+apt install direnv   # Ubuntu/Debian
+
+# Enable direnv in your shell (add to ~/.bashrc or ~/.zshrc)
+eval "$(direnv hook bash)"   # For bash
+eval "$(direnv hook zsh)"    # For zsh
+
+# Create .envrc in the docker directory
+cd docker
+cat > .envrc << 'EOF'
+export PG_MAJOR=17
+export COMPOSE_PROJECT_NAME=pg_lake_pg17
+EOF
+
+# Allow direnv to load the file
+direnv allow
+```
+
+### 3. Available Build Variables
+
+You can customize builds using these variables (can be set as environment variables or passed to Task):
 
 | Variable | Default | Description | Example |
 |----------|---------|-------------|---------|
@@ -33,12 +85,13 @@ You can customize builds using these variables:
 | `BASE_IMAGE_TAG` | `9` | Base OS version tag | `BASE_IMAGE_TAG=12` |
 | `VERSION` | `latest` | Image version tag (for registry) | `VERSION=v1.0.0` |
 
-### 3. Build and Start Everything
+### 4. Build and Start Everything
 
 ```bash
 cd docker
 
 # Build images and start all services (default: PostgreSQL 18)
+# If PG_MAJOR is set as env var, it will use that version automatically
 task compose:up
 
 # Build images and start all services for PostgreSQL 17
@@ -61,11 +114,17 @@ This single command will:
 - Start pgduck_server (DuckDB integration)
 - Start LocalStack (S3-compatible storage)
 
-### 4. Connect and Test
+### 5. Connect and Test
 
 ```bash
 # Connect to PostgreSQL from your host
 psql -h localhost -p 5432 -U postgres
+
+# Verify PostgreSQL version (should match your PG_MAJOR)
+SHOW server_version;
+# Example output for PG 18: PostgreSQL 18.0 on ...
+# Example output for PG 17: PostgreSQL 17.6 on ...
+# Example output for PG 16: PostgreSQL 16.10 on ...
 
 # Create a test Iceberg table
 CREATE TABLE test(id int, name text) USING iceberg;

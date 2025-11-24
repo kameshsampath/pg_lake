@@ -6,7 +6,10 @@ Multi-stage optimized Docker builds for pg_lake with Task automation.
 
 ```bash
 # Install Task (if needed)
-brew install go-task  # macOS
+brew install go-task                    # macOS
+sh -c "$(curl -sL https://taskfile.dev/install.sh)" -- -d  # Linux
+choco install go-task                   # Windows (Chocolatey)
+scoop install task                      # Windows (Scoop)
 
 # Build and start everything
 cd docker
