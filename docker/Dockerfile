@@ -7,8 +7,8 @@ FROM ${BASE_IMAGE_OS}:${BASE_IMAGE_TAG} AS dev_base
 ARG BASE_IMAGE_OS
 ARG BASE_IMAGE_TAG
 
-# Build arguments (can be overridden at build time)
-ARG PG_MAJOR=18
+# Set environment variables for non-interactive installations and PostgreSQL/PostGIS versions
+ENV PG_LAKE_REF=main
 ARG PG16_VERSION=16.10
 ARG PG17_VERSION=17.6
 ARG PG18_VERSION=18.0
@@ -16,10 +16,6 @@ ARG POSTGIS_VERSION=3.6.0
 ARG PGAUDIT16_VERSION=REL_16_STABLE
 ARG PGAUDIT17_VERSION=REL_17_STABLE
 ARG PGAUDIT18_VERSION=REL_18_STABLE
-
-# Set environment variables from build args
-ENV PG_MAJOR=${PG_MAJOR}
-ENV PG_LAKE_REF=main
 
 # Install build dependencies
 RUN if [ "$BASE_IMAGE_OS" = "almalinux" ]; then \
@@ -159,78 +155,99 @@ RUN echo "postgres ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers.d/postgres
 USER 1001:1001
 WORKDIR /home/postgres
 
-# Set PostgreSQL version variables based on PG_MAJOR
-RUN if [ "$PG_MAJOR" = "16" ]; then \
-    echo "export PG_VERSION=$PG16_VERSION" >> ~/.pgenv; \
-    echo "export PGAUDIT_VERSION=$PGAUDIT16_VERSION" >> ~/.pgenv; \
-    echo "export PG_COMPILE_FLAGS='--enable-debug --enable-cassert --enable-depend --with-openssl --with-libxml --with-libxslt --with-icu --with-uuid=ossp --with-lz4'" >> ~/.pgenv; \
-    elif [ "$PG_MAJOR" = "17" ]; then \
-    echo "export PG_VERSION=$PG17_VERSION" >> ~/.pgenv; \
-    echo "export PGAUDIT_VERSION=$PGAUDIT17_VERSION" >> ~/.pgenv; \
-    echo "export PG_COMPILE_FLAGS='--enable-debug --enable-depend --with-openssl --with-libxml --with-libxslt --with-icu --with-uuid=ossp --with-lz4 --enable-injection-points'" >> ~/.pgenv; \
-    elif [ "$PG_MAJOR" = "18" ]; then \
-    echo "export PG_VERSION=$PG18_VERSION" >> ~/.pgenv; \
-    echo "export PGAUDIT_VERSION=$PGAUDIT18_VERSION" >> ~/.pgenv; \
-    echo "export PG_COMPILE_FLAGS='--enable-debug --enable-depend --with-openssl --with-libxml --with-libxslt --with-icu --with-uuid=ossp --with-lz4 --enable-injection-points'" >> ~/.pgenv; \
-    fi && \
-    . ~/.pgenv && \
-    wget https://ftp.postgresql.org/pub/source/v$PG_VERSION/postgresql-$PG_VERSION.tar.gz && \
+# Download PostgreSQL 16, 17, 18, PostGIS
+RUN wget https://ftp.postgresql.org/pub/source/v$PG16_VERSION/postgresql-$PG16_VERSION.tar.gz && \
+    wget https://ftp.postgresql.org/pub/source/v$PG17_VERSION/postgresql-$PG17_VERSION.tar.gz && \
+    wget https://ftp.postgresql.org/pub/source/v$PG18_VERSION/postgresql-$PG18_VERSION.tar.gz && \
     wget https://download.osgeo.org/postgis/source/postgis-$POSTGIS_VERSION.tar.gz && \
-    wget https://github.com/pgaudit/pgaudit/archive/refs/heads/$PGAUDIT_VERSION.tar.gz && \
-    tar -xzf postgresql-$PG_VERSION.tar.gz && rm postgresql-$PG_VERSION.tar.gz && \
-    tar -xzf $PGAUDIT_VERSION.tar.gz && rm $PGAUDIT_VERSION.tar.gz && \
+    wget https://github.com/pgaudit/pgaudit/archive/refs/heads/$PGAUDIT16_VERSION.tar.gz && \
+    wget https://github.com/pgaudit/pgaudit/archive/refs/heads/$PGAUDIT17_VERSION.tar.gz && \
+    wget https://github.com/pgaudit/pgaudit/archive/refs/heads/$PGAUDIT18_VERSION.tar.gz && \
+    tar -xzf postgresql-$PG16_VERSION.tar.gz && rm postgresql-$PG16_VERSION.tar.gz && \
+    tar -xzf postgresql-$PG17_VERSION.tar.gz && rm postgresql-$PG17_VERSION.tar.gz && \
+    tar -xzf postgresql-$PG18_VERSION.tar.gz && rm postgresql-$PG18_VERSION.tar.gz && \
+    tar -xzf $PGAUDIT16_VERSION.tar.gz && rm $PGAUDIT16_VERSION.tar.gz && \
+    tar -xzf $PGAUDIT17_VERSION.tar.gz && rm $PGAUDIT17_VERSION.tar.gz && \
+    tar -xzf $PGAUDIT18_VERSION.tar.gz && rm $PGAUDIT18_VERSION.tar.gz && \
     tar -xzf postgis-$POSTGIS_VERSION.tar.gz && rm postgis-$POSTGIS_VERSION.tar.gz
 
+ARG PG_COMPILE_FLAGS_16="--enable-debug --enable-cassert --enable-depend --with-openssl --with-libxml --with-libxslt --with-icu --with-uuid=ossp --with-lz4"
+# PG 17-18 have asserts disabled
+ARG PG_COMPILE_FLAGS_17="--enable-debug --enable-depend --with-openssl --with-libxml --with-libxslt --with-icu --with-uuid=ossp --with-lz4 --enable-injection-points"
+ARG PG_COMPILE_FLAGS_18="--enable-debug --enable-depend --with-openssl --with-libxml --with-libxslt --with-icu --with-uuid=ossp --with-lz4 --enable-injection-points"
 ENV PGBASEDIR=/home/postgres
 
-# Compile and install PostgreSQL for the selected major version
-RUN . ~/.pgenv && \
-    cd postgresql-$PG_VERSION && \
-    ./configure --prefix=$PGBASEDIR/pgsql-$PG_MAJOR $PG_COMPILE_FLAGS && \
+# Compile and install PostgreSQL 16 with pgindent
+RUN cd postgresql-$PG16_VERSION && \
+    ./configure --prefix=$PGBASEDIR/pgsql-16 $PG_COMPILE_FLAGS_16 && \
     make -j `nproc` install && \
     make -C src/test/isolation install && \
-    (if [ "$PG_MAJOR" != "16" ]; then make -C src/test/modules/injection_points install; fi) && \
     make -j `nproc` -C src/tools/pg_bsd_indent install && \
-    cp src/tools/pgindent/pgindent $PGBASEDIR/pgsql-$PG_MAJOR/bin/ && \
-    cp src/tools/pgindent/typedefs.list $PGBASEDIR/pgsql-$PG_MAJOR/share/ && \
-    mkdir -pv $PGBASEDIR/pgsql-$PG_MAJOR/regress && cp -r src/test/regress/* $PGBASEDIR/pgsql-$PG_MAJOR/regress && \
+    cp src/tools/pgindent/pgindent $PGBASEDIR/pgsql-16/bin/ && \
+    cp src/tools/pgindent/typedefs.list $PGBASEDIR/pgsql-16/share/ && \
+    mkdir -pv $PGBASEDIR/pgsql-16/regress && cp -r src/test/regress/* $PGBASEDIR/pgsql-16/regress && \
     (cd contrib && make -j `nproc` install) && \
-    cd .. && rm -rf postgresql-$PG_VERSION*
+    cd .. && rm -rf postgresql-$PG16_VERSION*
 
-# Compile and install PG AUDIT for the selected major version
-RUN . ~/.pgenv && \
-    cd pgaudit-$PGAUDIT_VERSION && \
-    make -j `nproc` install USE_PGXS=1 PG_CONFIG=$PGBASEDIR/pgsql-$PG_MAJOR/bin/pg_config && \
-    cd .. && rm -rf pgaudit-$PGAUDIT_VERSION*
-
-# Compile and install PostGIS for the selected major version
-RUN cd postgis-$POSTGIS_VERSION && \
-    ./configure --prefix=$PGBASEDIR/pgsql-$PG_MAJOR/ --with-pgconfig=$PGBASEDIR/pgsql-$PG_MAJOR/bin/pg_config && \
+# Compile and install PostgreSQL 17 with pgindent
+RUN cd postgresql-$PG17_VERSION && \
+    ./configure --prefix=$PGBASEDIR/pgsql-17 $PG_COMPILE_FLAGS_17 && \
     make -j `nproc` && make install && \
+    make -C src/test/isolation install && \
+    make -C src/test/modules/injection_points install && \
+    make -j `nproc` -C src/tools/pg_bsd_indent install && \
+    cp src/tools/pgindent/pgindent $PGBASEDIR/pgsql-17/bin/ && \
+    cp src/tools/pgindent/typedefs.list $PGBASEDIR/pgsql-17/share/ && \
+    mkdir -pv $PGBASEDIR/pgsql-17/regress && cp -r src/test/regress/* $PGBASEDIR/pgsql-17/regress && \
+    (cd contrib && make -j `nproc` install) && \
+    cd .. && rm -rf postgresql-$PG17_VERSION*
+
+# Compile and install PostgreSQL 18 with pgindent
+RUN cd postgresql-$PG18_VERSION && \
+    ./configure --prefix=$PGBASEDIR/pgsql-18 $PG_COMPILE_FLAGS_18 && \
+    make -j `nproc` && make install && \
+    make -C src/test/isolation install && \
+    make -C src/test/modules/injection_points install && \
+    make -j `nproc` -C src/tools/pg_bsd_indent install && \
+    cp src/tools/pgindent/pgindent $PGBASEDIR/pgsql-18/bin/ && \
+    cp src/tools/pgindent/typedefs.list $PGBASEDIR/pgsql-18/share/ && \
+    mkdir -pv $PGBASEDIR/pgsql-18/regress && cp -r src/test/regress/* $PGBASEDIR/pgsql-18/regress && \
+    (cd contrib && make -j `nproc` install) && \
+    cd .. && rm -rf postgresql-$PG18_VERSION*
+
+# Compile and install PG AUDIT 16
+RUN cd pgaudit-$PGAUDIT16_VERSION && \
+    make -j `nproc` install USE_PGXS=1 PG_CONFIG=$PGBASEDIR/pgsql-16/bin/pg_config
+
+# Compile and install PG AUDIT 17
+RUN cd pgaudit-$PGAUDIT17_VERSION && \
+    make -j `nproc` install USE_PGXS=1 PG_CONFIG=$PGBASEDIR/pgsql-17/bin/pg_config
+
+# Compile and install PG AUDIT 18
+RUN cd pgaudit-$PGAUDIT18_VERSION && \
+    make -j `nproc` install USE_PGXS=1 PG_CONFIG=$PGBASEDIR/pgsql-18/bin/pg_config
+
+# Compile and install PostGIS
+RUN cd postgis-$POSTGIS_VERSION && \
+    ./configure --prefix=$PGBASEDIR/pgsql-16/ --with-pgconfig=$PGBASEDIR/pgsql-16/bin/pg_config && make -j `nproc` && make install && make clean && \
+    ./configure --prefix=$PGBASEDIR/pgsql-17/ --with-pgconfig=$PGBASEDIR/pgsql-17/bin/pg_config && make -j `nproc` && make install && make clean && \
+    ./configure --prefix=$PGBASEDIR/pgsql-18/ --with-pgconfig=$PGBASEDIR/pgsql-18/bin/pg_config && make -j `nproc` && make install && make clean && \
     cd .. && rm -rf postgis-$POSTGIS_VERSION*
 
-# Compile and install pg_cron for the selected major version
+# Compile and install pg_cron
 RUN git clone https://github.com/citusdata/pg_cron.git && \
     cd pg_cron && \
-    make install PG_CONFIG=$PGBASEDIR/pgsql-$PG_MAJOR/bin/pg_config && \
+    make install PG_CONFIG=$PGBASEDIR/pgsql-16/bin/pg_config && make clean PG_CONFIG=$PGBASEDIR/pgsql-16/bin/pg_config && \
+    make install PG_CONFIG=$PGBASEDIR/pgsql-17/bin/pg_config && make clean PG_CONFIG=$PGBASEDIR/pgsql-17/bin/pg_config && \
+    make install PG_CONFIG=$PGBASEDIR/pgsql-18/bin/pg_config && make clean PG_CONFIG=$PGBASEDIR/pgsql-18/bin/pg_config && \
     cd .. && rm -rf pg_cron
-
-ENV PATH=/home/postgres/pgsql-$PG_MAJOR/bin:$PATH
 
 # Install vcpkg as postgres user
 ARG VCPKG_VERSION=2025.01.13
 
-# Set environment variables to help with download issues
-ENV VCPKG_FORCE_SYSTEM_BINARIES=1
-ENV VCPKG_MAX_CONCURRENCY=1
-
 RUN git clone https://github.com/Microsoft/vcpkg.git -b $VCPKG_VERSION /home/postgres/vcpkg && \
     ./vcpkg/bootstrap-vcpkg.sh && \
-    # Install packages with retry logic for network issues
-    (./vcpkg/vcpkg install azure-identity-cpp azure-storage-blobs-cpp azure-storage-files-datalake-cpp openssl || \
-    (echo "Retrying vcpkg install after network error..." && sleep 5 && \
-    ./vcpkg/vcpkg install azure-identity-cpp azure-storage-blobs-cpp azure-storage-files-datalake-cpp openssl)) && \
-    rm -rf /home/postgres/vcpkg/buildtrees /home/postgres/vcpkg/downloads
+    ./vcpkg/vcpkg install azure-identity-cpp azure-storage-blobs-cpp azure-storage-files-datalake-cpp openssl
 
 ENV VCPKG_TOOLCHAIN_PATH="/home/postgres/vcpkg/scripts/buildsystems/vcpkg.cmake"
 
@@ -244,28 +261,41 @@ RUN git clone https://github.com/snowflake-labs/pg_lake.git \
 ############## pg_lake_builder - Build all pg_lake extensions ##############
 FROM base AS pg_lake_builder
 
+# need to redefine ARGs in each stage
+ARG PG_MAJOR=18
+
+# Set environment variables for the selected PostgreSQL version
+ENV PG_MAJOR=${PG_MAJOR}
+ENV PATH=/home/postgres/pgsql-${PG_MAJOR}/bin:$PATH
+
 # Install pg_lake extensions (build happens here, not in final image)
 RUN cd pg_lake && \
-    make install-pg_extension_base && \
-    make install-pg_map && \
-    make install-pg_extension_updater && \
-    make install-pg_lake_engine && \
-    make install-avro && \
-    make install-pg_lake_iceberg && \
-    make install-pg_lake_table && \
-    make install-pg_lake_spatial && \
-    make install-pg_lake_copy && \
-    make install-pg_lake && \
-    make install-pg_lake_benchmark
+    PG_CONFIG=/home/postgres/pgsql-${PG_MAJOR}/bin/pg_config make install-pg_extension_base && \
+    PG_CONFIG=/home/postgres/pgsql-${PG_MAJOR}/bin/pg_config make install-pg_map && \
+    PG_CONFIG=/home/postgres/pgsql-${PG_MAJOR}/bin/pg_config make install-pg_extension_updater && \
+    PG_CONFIG=/home/postgres/pgsql-${PG_MAJOR}/bin/pg_config make install-pg_lake_engine && \
+    PG_CONFIG=/home/postgres/pgsql-${PG_MAJOR}/bin/pg_config make install-avro && \
+    PG_CONFIG=/home/postgres/pgsql-${PG_MAJOR}/bin/pg_config make install-pg_lake_iceberg && \
+    PG_CONFIG=/home/postgres/pgsql-${PG_MAJOR}/bin/pg_config make install-pg_lake_table && \
+    PG_CONFIG=/home/postgres/pgsql-${PG_MAJOR}/bin/pg_config make install-pg_lake_spatial && \
+    PG_CONFIG=/home/postgres/pgsql-${PG_MAJOR}/bin/pg_config make install-pg_lake_copy && \
+    PG_CONFIG=/home/postgres/pgsql-${PG_MAJOR}/bin/pg_config make install-pg_lake && \
+    PG_CONFIG=/home/postgres/pgsql-${PG_MAJOR}/bin/pg_config make install-pg_lake_benchmark
 
 ############## pgduck_builder - Build duckdb_pglake and pgduck_server ##############
 FROM base AS pgduck_builder
 
+# need to redefine ARGs in each stage
+ARG PG_MAJOR=18
 ARG PGCOMPAT_BUILD_CONFIG=Release
 
+# Set environment variables for the selected PostgreSQL version
+ENV PG_MAJOR=${PG_MAJOR}
+ENV PATH=/home/postgres/pgsql-${PG_MAJOR}/bin:$PATH
+
 # Install pgduck_server (build happens here, not in final image)
-RUN cd pg_lake/duckdb_pglake && make && make install && rm -r build
-RUN cd pg_lake/pgduck_server && make && make install
+RUN cd pg_lake/duckdb_pglake && PG_CONFIG=/home/postgres/pgsql-${PG_MAJOR}/bin/pg_config make && make install && rm -r build
+RUN cd pg_lake/pgduck_server && PG_CONFIG=/home/postgres/pgsql-${PG_MAJOR}/bin/pg_config make && make install
 
 ############## runtime_base - Minimal runtime environment ##############
 ARG BASE_IMAGE_OS="almalinux"
@@ -275,7 +305,6 @@ FROM ${BASE_IMAGE_OS}:${BASE_IMAGE_TAG} AS runtime_base
 # need to redefine ARGs in each stage
 ARG BASE_IMAGE_OS
 ARG BASE_IMAGE_TAG
-ARG PG_MAJOR=18
 
 # Install ONLY runtime libraries (no -devel packages, no build tools)
 RUN if [ "$BASE_IMAGE_OS" = "almalinux" ]; then \
@@ -341,12 +370,16 @@ USER 1001:1001
 WORKDIR /home/postgres
 
 ENV PGBASEDIR=/home/postgres
-ENV PATH=/home/postgres/pgsql-$PG_MAJOR/bin:$PATH
 
 ############## pg_lake_postgres - Final runtime image (COPY ONLY) ##############
 FROM runtime_base AS pg_lake_postgres
 
+# need to redefine ARGs in each stage
 ARG PG_MAJOR=18
+
+# Set environment variables for runtime
+ENV PG_MAJOR=${PG_MAJOR}
+ENV PATH=/home/postgres/pgsql-${PG_MAJOR}/bin:$PATH
 
 # Copy PostgreSQL binaries and libraries for the selected version from dev_base
 COPY --from=dev_base --chown=postgres:postgres /home/postgres/pgsql-${PG_MAJOR} /home/postgres/pgsql-${PG_MAJOR}
@@ -357,12 +390,17 @@ COPY --from=pg_lake_builder --chown=postgres:postgres /home/postgres/pgsql-${PG_
 COPY --from=pg_lake_builder --chown=postgres:postgres /home/postgres/pgsql-${PG_MAJOR}/share /home/postgres/pgsql-${PG_MAJOR}/share
 
 # Initialize database (lightweight operation, doesn't compile anything)
-RUN initdb -D $PGBASEDIR/pgsql-$PG_MAJOR/data -U postgres --locale=C.UTF-8 --data-checksums
+RUN initdb -D $PGBASEDIR/pgsql-${PG_MAJOR}/data -U postgres --locale=C.UTF-8 --data-checksums
 
 ############## pgduck_server - Final runtime image (COPY ONLY) ##############
 FROM runtime_base AS pgduck_server
 
+# need to redefine ARGs in each stage
 ARG PG_MAJOR=18
+
+# Set environment variables for runtime
+ENV PG_MAJOR=${PG_MAJOR}
+ENV PATH=/home/postgres/pgsql-${PG_MAJOR}/bin:$PATH
 
 # Copy PostgreSQL binaries and libraries for the selected version
 COPY --from=dev_base --chown=postgres:postgres /home/postgres/pgsql-${PG_MAJOR}/bin /home/postgres/pgsql-${PG_MAJOR}/bin
