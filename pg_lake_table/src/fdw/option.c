@@ -108,6 +108,7 @@ pg_lake_table_validator(PG_FUNCTION_ARGS)
 	char	   *csvDelim = NULL;
 	char	   *csvQuote = NULL;
 	char	   *csvEscape = NULL;
+	char	   *csvNewLine = NULL;
 	char	   *csvNull = NULL;
 
 	bool		foundZipPath = false;
@@ -294,6 +295,20 @@ pg_lake_table_validator(PG_FUNCTION_ARGS)
 
 			csvOptionProvided = true;
 		}
+		else if (catalog == ForeignTableRelationId && strcmp(def->defname, "new_line") == 0)
+		{
+			csvNewLine = defGetString(def);
+
+			if (strcmp(csvNewLine, "\\n") != 0 &&
+				strcmp(csvNewLine, "\\r\\n") != 0 &&
+				strcmp(csvNewLine, "\\r") != 0)
+				ereport(ERROR,
+						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						 errmsg("new_line must be one of \\n, \\r\\n, or \\r")));
+
+			csvOptionProvided = true;
+		}
+
 		else if (catalog == ForeignTableRelationId && strcmp(def->defname, "zip_path") == 0)
 		{
 			foundZipPath = true;
@@ -393,7 +408,7 @@ pg_lake_table_validator(PG_FUNCTION_ARGS)
 	if (copyDataFormat != DATA_FORMAT_CSV && csvOptionProvided)
 		ereport(ERROR,
 				(errcode(ERRCODE_SYNTAX_ERROR),
-				 errmsg("\"header\", \"delimiter\", \"quote\", \"escape\" and \"null\" options "
+				 errmsg("\"header\", \"delimiter\", \"quote\", \"escape\", \"new_line\" and \"null\" options "
 						"are only supported for csv format tables")));
 
 	if (copyDataFormat == DATA_FORMAT_CSV)
@@ -480,6 +495,7 @@ InitPgLakeOptions(void)
 		{"delimiter", ForeignTableRelationId},
 		{"quote", ForeignTableRelationId},
 		{"escape", ForeignTableRelationId},
+		{"new_line", ForeignTableRelationId},
 		{"null", ForeignTableRelationId},
 
 		/* whether the table is writable */
